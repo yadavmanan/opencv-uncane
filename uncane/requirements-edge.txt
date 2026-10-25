@@ -1,0 +1,10 @@
+# Edge device (laptop / Jetson / Raspberry Pi 5). Python 3.10+.
+opencv-python>=5.0          # OpenCV 5 DNN + optical flow (use opencv-python-headless on boards without a display)
+numpy>=1.26
+pyyaml>=6.0
+sounddevice>=0.4            # low-latency spatial beeps (needs PortAudio; bundled on Windows/macOS wheels)
+pyttsx3>=2.90               # offline text-to-speech (SAPI5 / NSSpeechSynthesizer / eSpeak)
+# Optional:
+# vosk>=0.3.45              # offline voice commands (python scripts/download_models.py --only vosk)
+# pyserial>=3.5             # haptic belt/vest over serial
+# onnxruntime>=1.18         # alternative depth backend (depth.backend: onnxruntime)

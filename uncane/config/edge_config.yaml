@@ -1,0 +1,103 @@
+# UnCane-y AI edge configuration. Every key is optional; defaults live in
+# src/uncane/edge/config.py. Override any value on the command line with
+#   python -m uncane.edge.app --set depth.input_size=192 --set cloud.enabled=false
+
+device_id: "uncane-dev-01"
+
+camera:
+  source: 0                 # webcam index, video file path, or RTSP/HTTP URL (phone IP-camera app)
+  width: 640
+  height: 480
+  hfov_deg: 70.0            # horizontal field of view; measure it (docs/SETUP.md §6) - geometry depends on it
+  loop_video: true          # restart video files at EOF (handy for demos)
+
+mount:                      # where the camera sits on the body - drives floor-plane calibration
+  height_m: 1.30            # camera height above the floor (chest strap ~1.2-1.4 m)
+  pitch_deg: 12.0           # downward tilt of the camera (0 = level)
+  user_height_m: 1.75       # top of the head; hazards above this are ignored
+
+depth:
+  model_path: "models/midas_v21_small_256.onnx"
+  output: "relative_inverse" # relative_inverse (MiDaS / Depth-Anything relative) | metric (DA-V2 metric models)
+  input_size: 128            # square input; multiple of 32 for MiDaS, 14 for Depth-Anything.
+                             # 128 meets <50 ms on a laptop CPU; use 192-256 on faster hardware.
+  backend: "opencv"          # opencv (OpenCV 5 DNN) | onnxruntime
+  opencv_target: "cpu"       # cpu | cuda | cuda_fp16 | opencl (GPU targets use the classic engine:
+                             # MiDaS then needs input_size 256, its export size)
+  input_name: null           # onnxruntime only; null = first input
+
+hazards:
+  analyzer: "geometric"      # geometric (3D corridor, needs calibration) | sector (legacy image thirds)
+  corridor_half_width_m: 0.40
+  side_width_m: 1.50
+  max_range_m: 3.0
+  critical_m: 1.2            # CENTER obstacle closer than this -> CRITICAL
+  critical_head_m: 1.6       # head-height hazards get more warning time
+  warning_m: 2.2
+  side_warning_m: 1.2
+  floor_tolerance_m: 0.15    # anything lower than this above the floor is floor
+  min_pixel_fraction: 0.004  # ignore blobs smaller than this share of the depth map
+  grid_rows: 6
+  grid_cols: 8
+
+flow:
+  enabled: true
+  proc_width: 320
+  max_corners: 500
+  redetect_every: 4
+  ttc_warning_s: 3.0
+  ttc_critical_s: 1.5
+  min_cluster_points: 8
+  persist_frames: 2
+
+detector:
+  enabled: true
+  model_path: "models/object_detection_yolox_2022nov.onnx"
+  conf_threshold: 0.45
+  nms_threshold: 0.5
+  input_size: 416            # 640 = most accurate (~340 ms CPU), 416 ~130 ms, 320 ~90 ms
+  hz: 2.0                    # own thread; keep low on CPU-only devices so it doesn't starve the reflex loop
+
+arbiter:
+  confirm_frames: 2          # hazard must be seen in N of the last `window` frames
+  window: 3
+  release_frames: 4
+  speech_cooldown_s: 4.0
+
+keyframes:
+  ssim_threshold: 0.80       # below this the scene "changed" (ambient mode, telemetry)
+  min_interval_s: 3.0
+  buffer_frames: 8           # sharpest of the last N frames is sent with a question
+  jpeg_quality: 80
+  max_side_px: 768
+
+audio:
+  enabled: true
+  volume: 0.35
+  tts_rate: 190
+  tts_voice: null            # substring of an installed voice name
+  haptics_serial_port: null  # e.g. COM5 or /dev/ttyUSB0 for the haptic belt/vest
+
+voice:
+  backend: "keyboard"        # keyboard | vosk | none
+  vosk_model_path: "models/vosk-model-small-en-us-0.15"
+  record_seconds: 4.0
+  presets:
+    "1": "Where is the red water bottle?"
+    "2": "What does the sign in front of me say?"
+    "3": "Where is the door handle?"
+    "4": "Describe what is around me."
+
+cloud:
+  enabled: true
+  api_url: "${UNCANE_API_URL}"      # from `sam deploy` output ApiUrl, e.g. https://abc.execute-api.us-east-1.amazonaws.com/prod
+  api_key: "${UNCANE_API_KEY}"      # from `aws apigateway get-api-key --include-value`
+  timeout_s: 8.0
+  ambient_mode: false               # proactively describe signage when the scene changes
+  max_answer_age_s: 6.0             # drop answers that arrive too late to be useful
+  offline_after_failures: 3
+  static_location: null             # e.g. {lat: 40.7411, lon: -73.9897} for demos without phone GPS
+
+debug:
+  show_windows: true
+  log_level: "INFO"

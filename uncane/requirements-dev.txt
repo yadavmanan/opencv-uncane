@@ -1,0 +1,6 @@
+-r requirements-edge.txt
+anthropic[bedrock]>=1.8.0   # cloud tier locally (uncane.cloud.local_server, eval --direct)
+boto3>=1.34
+pytest>=8
+cfn-lint>=1.0
+pycocotools>=2.0.7          # eval/eval_detector_coco.py

@@ -1,0 +1,6 @@
+# Installed by SageMaker into the training container before train_vizwiz_lora.py runs.
+transformers>=4.49
+peft>=0.14
+accelerate>=1.2
+pillow>=10
+qwen-vl-utils>=0.0.8

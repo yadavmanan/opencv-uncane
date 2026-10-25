@@ -1,0 +1,315 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  UnCane-y AI - Hemisphere 2 (cloud reasoning). API Gateway (API key + usage plan)
+  -> Lambda (agent + safety verifier) -> Claude in Amazon Bedrock, with DynamoDB
+  session memory, S3 telemetry, CloudWatch dashboard/alarms, and an optional
+  SageMaker role for VizWiz fine-tuning.
+
+Parameters:
+  StageName:
+    Type: String
+    Default: prod
+  ModelId:
+    Type: String
+    Default: anthropic.claude-sonnet-5
+    Description: Claude in Amazon Bedrock model ID (anthropic.claude-sonnet-5, anthropic.claude-haiku-4-5, anthropic.claude-opus-5 ...)
+  BedrockRegion:
+    Type: String
+    Default: ""
+    Description: Region for the bedrock-mantle endpoint. Empty = same region as this stack.
+  Effort:
+    Type: String
+    Default: low
+    AllowedValues: [low, medium, high]
+    Description: Reasoning effort. low keeps answers near the 1.5 s budget.
+  VlmBackend:
+    Type: String
+    Default: bedrock
+    AllowedValues: [bedrock, mantle, sagemaker, mock]
+    Description: bedrock = Claude via SigV4; mantle = open VLM (Qwen3-VL) via Mantle API key.
+  MantleApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+    Description: Bedrock Mantle API key. Required only when VlmBackend=mantle.
+  SageMakerEndpointName:
+    Type: String
+    Default: ""
+    Description: Required only when VlmBackend=sagemaker.
+  SaveKeyframes:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Store camera keyframes in S3 (privacy-sensitive; for evaluation only).
+  TelemetryRetentionDays:
+    Type: Number
+    Default: 30
+  DailyRequestQuota:
+    Type: Number
+    Default: 5000
+    Description: Per-API-key daily cap; protects the Bedrock bill.
+  DemoTransit:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+  TransitApiUrl:
+    Type: String
+    Default: ""
+  PlaceIndexName:
+    Type: String
+    Default: ""
+    Description: Amazon Location Service place index for "where am I" (optional).
+  AlarmEmail:
+    Type: String
+    Default: ""
+  CreateSageMakerRole:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+Conditions:
+  HasBedrockRegion: !Not [!Equals [!Ref BedrockRegion, ""]]
+  HasSageMakerEndpoint: !Not [!Equals [!Ref SageMakerEndpointName, ""]]
+  HasPlaceIndex: !Not [!Equals [!Ref PlaceIndexName, ""]]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
+  MakeSageMakerRole: !Equals [!Ref CreateSageMakerRole, "true"]
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]
+    Timeout: 28
+    MemorySize: 1024
+    Tracing: Active
+
+Resources:
+  # ------------------------------------------------------------------ storage
+  DataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ObjectOwnership: BucketOwnerEnforced}]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-telemetry
+            Status: Enabled
+            Prefix: telemetry/
+            ExpirationInDays: !Ref TelemetryRetentionDays
+          - Id: expire-keyframes
+            Status: Enabled
+            Prefix: keyframes/
+            ExpirationInDays: !Ref TelemetryRetentionDays
+
+  DataBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource: [!GetAtt DataBucket.Arn, !Sub "${DataBucket.Arn}/*"]
+            Condition: {Bool: {"aws:SecureTransport": "false"}}
+
+  SessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: session_id, AttributeType: S}
+        - {AttributeName: ts, AttributeType: N}
+      KeySchema:
+        - {AttributeName: session_id, KeyType: HASH}
+        - {AttributeName: ts, KeyType: RANGE}
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  # -------------------------------------------------------------- API + Lambda
+  NavigatorApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-api
+      StageName: !Ref StageName
+      TracingEnabled: true
+      Auth:
+        ApiKeyRequired: true
+        UsagePlan:
+          CreateUsagePlan: PER_API
+          Description: UnCane device usage plan
+          Quota: {Limit: !Ref DailyRequestQuota, Period: DAY}
+          Throttle: {BurstLimit: 10, RateLimit: 5}
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          MetricsEnabled: true
+          ThrottlingBurstLimit: 20
+          ThrottlingRateLimit: 10
+
+  NavigatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: UnCane cloud reasoning - Bedrock VLM agent + safety verifier
+      CodeUri: src/
+      Handler: uncane.cloud.handler.lambda_handler
+      Environment:
+        Variables:
+          MODEL_ID: !Ref ModelId
+          BEDROCK_REGION: !If [HasBedrockRegion, !Ref BedrockRegion, !Ref "AWS::Region"]
+          EFFORT: !Ref Effort
+          VLM_BACKEND: !Ref VlmBackend
+          MANTLE_API_KEY: !Ref MantleApiKey
+          SAGEMAKER_ENDPOINT: !Ref SageMakerEndpointName
+          SESSIONS_TABLE: !Ref SessionsTable
+          TELEMETRY_BUCKET: !Ref DataBucket
+          SAVE_KEYFRAMES: !Ref SaveKeyframes
+          DEMO_TRANSIT: !Ref DemoTransit
+          TRANSIT_API_URL: !Ref TransitApiUrl
+          PLACE_INDEX_NAME: !Ref PlaceIndexName
+          MEMORY_TURNS: "4"
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBCrudPolicy: {TableName: !Ref SessionsTable}
+        - S3WritePolicy: {BucketName: !Ref DataBucket}
+        - Statement:
+            - Sid: ClaudeInBedrock
+              Effect: Allow
+              Action:
+                - bedrock-mantle:CreateInference   # Messages API endpoint (bedrock-mantle)
+                - bedrock:InvokeModel              # legacy InvokeModel path, if you switch to it
+                - bedrock:InvokeModelWithResponseStream
+              Resource: "*"
+            - !If
+              - HasSageMakerEndpoint
+              - Sid: SageMakerVlm
+                Effect: Allow
+                Action: sagemaker:InvokeEndpoint
+                Resource: !Sub arn:${AWS::Partition}:sagemaker:${AWS::Region}:${AWS::AccountId}:endpoint/${SageMakerEndpointName}
+              - !Ref AWS::NoValue
+            - !If
+              - HasPlaceIndex
+              - Sid: ReverseGeocode
+                Effect: Allow
+                Action: geo:SearchPlaceIndexForPosition
+                Resource: !Sub arn:${AWS::Partition}:geo:${AWS::Region}:${AWS::AccountId}:place-index/${PlaceIndexName}
+              - !Ref AWS::NoValue
+      Events:
+        Navigate:
+          Type: Api
+          Properties: {RestApiId: !Ref NavigatorApi, Path: /v1/navigate, Method: POST}
+        Health:
+          Type: Api
+          Properties: {RestApiId: !Ref NavigatorApi, Path: /v1/health, Method: GET}
+
+  NavigatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${NavigatorFunction}
+      RetentionInDays: 30
+
+  # --------------------------------------------------------------- monitoring
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+    Properties:
+      Subscription: [{Protocol: email, Endpoint: !Ref AlarmEmail}]
+
+  ErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Navigator Lambda errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions: [{Name: FunctionName, Value: !Ref NavigatorFunction}]
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmEmail, [!Ref AlarmTopic], !Ref "AWS::NoValue"]
+
+  LatencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Cloud reasoning p90 above 3 s (target 1.5 s)
+      Namespace: UnCane
+      MetricName: TotalLatencyMs
+      Dimensions:
+        - {Name: Service, Value: navigator}
+        - {Name: Model, Value: !Ref ModelId}
+      ExtendedStatistic: p90
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 3000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: !If [HasAlarmEmail, [!Ref AlarmTopic], !Ref "AWS::NoValue"]
+
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub ${AWS::StackName}-uncane
+      DashboardBody: !Sub |
+        {"widgets":[
+          {"type":"metric","x":0,"y":0,"width":12,"height":6,"properties":{"title":"Cloud reasoning latency (ms)","region":"${AWS::Region}","stat":"p50","period":60,
+            "metrics":[["UnCane","TotalLatencyMs","Service","navigator","Model","${ModelId}",{"label":"total p50"}],
+                       ["...",{"stat":"p90","label":"total p90"}],
+                       ["UnCane","ModelLatencyMs","Service","navigator","Model","${ModelId}",{"label":"model p50"}]],
+            "annotations":{"horizontal":[{"value":1500,"label":"1.5 s target"}]}}},
+          {"type":"metric","x":12,"y":0,"width":12,"height":6,"properties":{"title":"Safety overrides / better-view requests","region":"${AWS::Region}","stat":"Sum","period":300,
+            "metrics":[["UnCane","SafetyOverride","Service","navigator","Model","${ModelId}"],["UnCane","NeedsBetterView","Service","navigator","Model","${ModelId}"]]}},
+          {"type":"metric","x":0,"y":6,"width":12,"height":6,"properties":{"title":"Lambda","region":"${AWS::Region}","period":60,
+            "metrics":[["AWS/Lambda","Invocations","FunctionName","${NavigatorFunction}",{"stat":"Sum"}],["AWS/Lambda","Errors","FunctionName","${NavigatorFunction}",{"stat":"Sum"}],["AWS/Lambda","Duration","FunctionName","${NavigatorFunction}",{"stat":"p90"}]]}},
+          {"type":"metric","x":12,"y":6,"width":12,"height":6,"properties":{"title":"API Gateway","region":"${AWS::Region}","period":60,"stat":"Sum",
+            "metrics":[["AWS/ApiGateway","Count","ApiName","${AWS::StackName}-api"],["AWS/ApiGateway","4XXError","ApiName","${AWS::StackName}-api"],["AWS/ApiGateway","5XXError","ApiName","${AWS::StackName}-api"]]}}
+        ]}
+
+  # ----------------------------------------------- optional: SageMaker role
+  SageMakerExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: MakeSageMakerRole
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal: {Service: sagemaker.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSageMakerFullAccess
+      Policies:
+        - PolicyName: uncane-data
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject, s3:ListBucket]
+                Resource: [!GetAtt DataBucket.Arn, !Sub "${DataBucket.Arn}/*"]
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the edge device (cloud.api_url / UNCANE_API_URL)
+    Value: !Sub https://${NavigatorApi}.execute-api.${AWS::Region}.amazonaws.com/${StageName}
+  ApiKeyId:
+    Description: "Get the secret: aws apigateway get-api-key --api-key <id> --include-value --query value --output text"
+    Value: !Ref NavigatorApiApiKey
+  DataBucketName:
+    Value: !Ref DataBucket
+  SessionsTableName:
+    Value: !Ref SessionsTable
+  FunctionName:
+    Value: !Ref NavigatorFunction
+  DashboardUrl:
+    Value: !Sub https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=${AWS::StackName}-uncane
+  SageMakerRoleArn:
+    Condition: MakeSageMakerRole
+    Value: !GetAtt SageMakerExecutionRole.Arn

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uncane-ai"
+version = "0.1.0"
+description = "UnCane-y AI: split-intelligence assistive navigation agent (OpenCV 5 edge + AWS Bedrock cloud)"
+requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=5.0",
+    "numpy>=1.26",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+audio = ["sounddevice>=0.4", "pyttsx3>=2.90"]
+voice = ["vosk>=0.3.45", "sounddevice>=0.4"]
+haptics = ["pyserial>=3.5"]
+ort = ["onnxruntime>=1.18"]
+cloud = ["anthropic[bedrock]>=1.8.0", "boto3>=1.34"]
+data = ["pycocotools>=2.0.7", "tqdm>=4.66"]
+dev = ["pytest>=8", "cfn-lint>=1.0"]
+
+[project.scripts]
+uncane-edge = "uncane.edge.app:main"
+uncane-cloud-local = "uncane.cloud.local_server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+markers = [
+    "latency: edge latency benchmark on real models (run with -m latency)",
+    "live: calls real AWS services (run with -m live; costs money)",
+]
+addopts = "-m 'not latency and not live'"

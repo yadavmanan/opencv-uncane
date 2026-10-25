@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+.aws-sam/
+uncane/models/*.onnx
+uncane/models/*.zip
+uncane/models/vosk-*/
+uncane/data/
+uncane/eval/*.json
+*.egg-info/
+*.part
+.pytest_cache/
+
+# secrets: API keys live here, never commit
+.env
+.env.*
+!.env.example

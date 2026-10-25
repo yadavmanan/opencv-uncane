@@ -1,0 +1,6 @@
+# Lambda runtime dependencies (sam build installs these into the function package).
+# boto3 ships with the Lambda Python runtime; anthropic[bedrock] provides the
+# AnthropicBedrockMantle client for Claude in Amazon Bedrock.
+anthropic[bedrock]>=1.8.0
+# Qwen3-VL / open models on Bedrock Mantle use the OpenAI-compatible SDK (VLM_BACKEND=mantle).
+openai>=3.24,<4

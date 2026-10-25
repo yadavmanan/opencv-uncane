@@ -1,0 +1,19 @@
+# Defaults for `sam build` / `sam deploy`. Change region/stack name as needed.
+version = 0.1
+
+[default.global.parameters]
+stack_name = "uncane-ai"
+region = "us-east-1"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = "StageName=\"prod\" ModelId=\"qwen.qwen3-vl-235b-a22b-instruct\" BedrockRegion=\"us-east-1\" Effort=\"low\" VlmBackend=\"mantle\" SageMakerEndpointName=\"\" SaveKeyframes=\"false\" TelemetryRetentionDays=\"30\" DailyRequestQuota=\"5000\" DemoTransit=\"false\" TransitApiUrl=\"\" PlaceIndexName=\"\" AlarmEmail=\"\" CreateSageMakerRole=\"false\""
+s3_prefix = "uncane-ai"
+disable_rollback = true
+image_repositories = []
