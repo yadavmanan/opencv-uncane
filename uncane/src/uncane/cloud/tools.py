@@ -22,7 +22,7 @@ FINAL_ANSWER_TOOL: Dict[str, Any] = {
     "name": "final_answer",
     "description": (
         "Deliver the spoken answer to the user. Call exactly once, as your last action. "
-        "`speech` is read aloud verbatim, so keep it to one or two short sentences."
+        "`speech` is read aloud verbatim, so keep it to one or two short sentences except when the user explicitly asks you to read text aloud; then include all legible requested text."
     ),
     "input_schema": {
         "type": "object",

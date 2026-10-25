@@ -10,6 +10,8 @@ camera:
   height: 480
   hfov_deg: 70.0            # horizontal field of view; measure it (docs/SETUP.md §6) - geometry depends on it
   loop_video: true          # restart video files at EOF (handy for demos)
+  reopen_after_failures: 5
+  reopen_attempts: 3
 
 mount:                      # where the camera sits on the body - drives floor-plane calibration
   height_m: 1.30            # camera height above the floor (chest strap ~1.2-1.4 m)
@@ -37,8 +39,48 @@ hazards:
   side_warning_m: 1.2
   floor_tolerance_m: 0.15    # anything lower than this above the floor is floor
   min_pixel_fraction: 0.004  # ignore blobs smaller than this share of the depth map
+  merge_adjacent_levels: true
+  level_merge_distance_m: 0.5
+  dropoff_enabled: true
+  dropoff_min_depth_m: 0.40   # floor must read this far below the calibrated plane (depth noise alone reaches ~0.25)
+  dropoff_min_share: 0.25     # share of in-range pixels in a zone that must be that low
+  dropoff_range_m: 4.5        # drop-offs are searched farther out than obstacles
+  dropoff_critical_m: 1.7     # estimated edge distance; the nearest visible floor is ~1.6 m with the default mount
+  dropoff_warning_m: 2.6
   grid_rows: 6
   grid_cols: 8
+
+environment:
+  mode: outdoor
+  indoor_critical_m: 0.9
+  indoor_warning_m: 1.7
+  outdoor_critical_m: 1.2
+  outdoor_warning_m: 2.2
+
+crowd:
+  enabled: false
+  person_alert_distance_m: 1.0
+
+guidance:
+  enabled: true
+  timeout_s: 180.0
+  lost_after_s: 5.0
+  arrival_distance_m: 0.7
+  update_interval_s: 4.0
+
+monitor:
+  enabled: true
+  message_cooldown_s: 20.0
+  frame_stall_s: 5.0
+
+blackbox:
+  enabled: true
+  path: "data/blackbox.jsonl"
+  retention_frames: 300
+  save_snapshots: false
+
+user:
+  profile_path: "data/user_profile.json"
 
 flow:
   enabled: true
@@ -63,6 +105,8 @@ arbiter:
   window: 3
   release_frames: 4
   speech_cooldown_s: 4.0
+  dropoff_confirm_frames: 4  # drop-offs must be seen in N of the last `dropoff_window` frames
+  dropoff_window: 5
 
 keyframes:
   ssim_threshold: 0.80       # below this the scene "changed" (ambient mode, telemetry)
@@ -75,6 +119,7 @@ audio:
   enabled: true
   volume: 0.35
   tts_rate: 190
+  tts_volume: 1.0
   tts_voice: null            # substring of an installed voice name
   haptics_serial_port: null  # e.g. COM5 or /dev/ttyUSB0 for the haptic belt/vest
 
@@ -96,6 +141,7 @@ cloud:
   ambient_mode: false               # proactively describe signage when the scene changes
   max_answer_age_s: 6.0             # drop answers that arrive too late to be useful
   offline_after_failures: 3
+  verify_ssl: true                  # false skips TLS certificate checks; prefer SSL_CERT_FILE=<corporate CA .pem>
   static_location: null             # e.g. {lat: 40.7411, lon: -73.9897} for demos without phone GPS
 
 debug:

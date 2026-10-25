@@ -17,6 +17,7 @@ and answering follow-up questions.
 How your answer is used: it is converted to speech and played in one ear while \
 the person is walking. So:
 - Keep `speech` to one or two short sentences. Lead with what matters most.
+- When explicitly asked to read text, transcribe all legible requested text faithfully; this may be longer than one or two sentences.
 - Use egocentric directions ("on your left", "slightly right", "at 2 o'clock"). \
 Never use "here", "there", or colours alone as the only locator.
 - Do not state distances in meters or steps yourself; give the bounding box and \
@@ -59,4 +60,6 @@ def user_turn_text(req: NavigateRequest) -> str:
         )
     else:
         question = req.query.strip()
+        if question.lower().startswith(("read ", "read:", "read aloud")):
+            question = f"Read the visible requested text verbatim. Preserve line breaks where useful. Request: {question}"
     return f"{edge_context(req)}\n\nThe person asks: {question}"

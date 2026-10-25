@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import queue
+import ssl
 import threading
 import time
 import urllib.error
@@ -36,10 +37,14 @@ ResultCallback = Callable[[CloudResult], None]
 
 class CloudClient:
     def __init__(self, api_url: str, api_key: str, on_result: ResultCallback, timeout_s: float = 8.0,
-                 offline_after_failures: int = 3):
+                 offline_after_failures: int = 3, verify_ssl: bool = True):
         self.url = api_url.rstrip("/") + "/v1/navigate" if api_url else ""
         self.health_url = api_url.rstrip("/") + "/v1/health" if api_url else ""
         self.api_key = api_key
+        self._ssl_context = None
+        if not verify_ssl:
+            log.warning("cloud.verify_ssl is false: TLS certificates are NOT being verified")
+            self._ssl_context = ssl._create_unverified_context()
         self.on_result = on_result
         self.timeout_s = timeout_s
         self.offline_after = offline_after_failures
@@ -73,7 +78,7 @@ class CloudClient:
     def _post(self, url: str, body: Optional[bytes]) -> dict:
         headers = {"content-type": "application/json", "x-api-key": self.api_key}
         req = urllib.request.Request(url, data=body, headers=headers, method="POST" if body else "GET")
-        with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+        with urllib.request.urlopen(req, timeout=self.timeout_s, context=self._ssl_context) as resp:
             return json.loads(resp.read().decode("utf-8"))
 
     def health(self) -> bool:

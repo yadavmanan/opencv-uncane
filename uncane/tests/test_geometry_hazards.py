@@ -94,6 +94,51 @@ def test_side_obstacle_is_warning_not_critical():
     assert not [h for h in hf.hazards if h.zone == "CENTER"]
 
 
+def test_adjacent_levels_merge_and_preserve_worst_urgency_and_distance():
+    pipe = make_pipeline(output="metric")
+    hf = pipe.process(render((1.0, -0.30, 0.30, 0.0, 1.2)))
+    center = [h for h in hf.hazards if h.zone == "CENTER"]
+    assert len(center) == 1
+    assert center[0].urgency == "CRITICAL"
+    assert center[0].distance_m == pytest.approx(1.0, abs=0.2)
+
+
+def _floor_with_drop(edge_forward_m, drop_m):
+    """Metric depth of a flat floor whose surface steps down by drop_m beyond edge_forward_m."""
+    pipe = make_pipeline(output="metric")
+    _, _, floor_depth = pipe.geometry.rays(S, S)
+    z = np.minimum(np.broadcast_to(floor_depth, (S, S)), 30.0)
+    forward = pipe.geometry.backproject(z.astype(np.float32)).forward
+    lowered = z * (H_CAM + drop_m) / H_CAM
+    return pipe, np.where(forward > edge_forward_m, lowered, z).astype(np.float32)
+
+
+def test_dropoff_is_separate_ground_hazard():
+    pipe, depth = _floor_with_drop(1.4, 0.6)
+    hf = pipe.process(depth)
+    drops = [h for h in hf.hazards if h.label == "drop-off"]
+    assert drops
+    center = [h for h in drops if h.zone == "CENTER"]
+    assert center and center[0].urgency == "CRITICAL"
+    assert center[0].distance_m == pytest.approx(1.4, abs=0.3)
+    assert all(h.level == "GROUND" for h in drops)
+
+
+def test_far_dropoff_is_only_a_warning():
+    pipe, depth = _floor_with_drop(2.2, 0.6)
+    center = [h for h in pipe.process(depth).hazards if h.label == "drop-off" and h.zone == "CENTER"]
+    assert center and center[0].urgency == "WARNING"
+
+
+def test_depth_error_on_flat_floor_is_not_a_dropoff():
+    # 15% overestimate of far floor depth reads as ~0.2 m below the plane: noise, not a drop-off.
+    pipe, depth = _floor_with_drop(2.0, 0.0)
+    z = np.minimum(np.broadcast_to(pipe.geometry.rays(S, S)[2], (S, S)), 30.0)
+    forward = pipe.geometry.backproject(z.astype(np.float32)).forward
+    noisy = np.where(forward > 2.0, z * 1.15, z).astype(np.float32)
+    assert not [h for h in pipe.process(noisy).hazards if h.label == "drop-off"]
+
+
 def test_depth_grid_is_metric():
     pipe = make_pipeline(output="metric")
     hf = pipe.process(render())

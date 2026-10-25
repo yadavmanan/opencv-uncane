@@ -143,6 +143,8 @@ class DetectorThread:
 def label_hazards(hazards: List[HazardItem], dets: Sequence[Detection], hfov_deg: float) -> None:
     """Attach the most plausible class name to each hazard, in place."""
     for h in hazards:
+        if h.label == "drop-off":
+            continue
         cands = [d for d in dets if d.label in NAV_CLASSES
                  and zone_from_bearing(bearing_from_x(d.cx, hfov_deg)) == h.zone]
         if h.level == "HEAD":

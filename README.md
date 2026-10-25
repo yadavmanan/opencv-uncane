@@ -9,7 +9,7 @@
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![OpenCV](https://img.shields.io/badge/OpenCV-5.x-green)
 ![AWS](https://img.shields.io/badge/AWS-Bedrock%20%C2%B7%20Lambda%20%C2%B7%20SAM-orange)
-![Tests](https://img.shields.io/badge/tests-42%20offline-brightgreen)
+![Tests](https://img.shields.io/badge/tests-offline-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-lightgrey)
 
 *OpenCV AI Competition 2026, powered by AWS (Use Case 3)*
@@ -44,12 +44,16 @@ checks every cloud answer against the device's own depth sensing. If the camera 
 - **Sub-50 ms obstacle warnings with no network.** Metric depth from a single RGB camera.
 - **Head-height awareness.** A 3D corridor split into head, torso and ground zones, so branches and signs are caught as well as boxes.
 - **Approaching-object detection.** Optical-flow looming gives time-to-contact for fast things the cane never touches. Slow approaches are ignored to avoid false alarms.
-- **Calm, spatial audio.** Stereo beeps pan left and right and speed up as you get closer. Speech is rate-limited and debounced.
+- **Calm, spatial audio.** Stereo beeps pan left and right and speed up as you get closer. Speech is rate-limited, interruptible, and adjustable; quiet mode suppresses non-critical tones.
+- **Drop-off awareness.** The geometric analyzer can flag a floor region below the calibrated plane separately from ordinary obstacles.
+- **Offline controls and user state.** Repeat/stop, quiet and environment modes, speech settings, local notes, and recent object lookup work without cloud access.
+- **Local target guidance and monitoring.** A found object can be tracked on-device; camera health and frame stalls are monitored independently.
+- **Private by default event history.** Short event summaries stay in memory until feedback or watchdog export; camera snapshots are disabled by default.
 - **Natural-language help.** Ask about objects, text and surroundings. The answer starts with a deterministic turn instruction, such as "Turn 15 degrees right, walk four steps."
 - **Anti-hallucination verifier.** Cloud answers are grounded with edge depth and overridden if they contradict what the device sees.
 - **Graceful degradation.** Cloud down? The device keeps protecting the user and says so.
 - **Deployable in one command.** AWS SAM template for API Gateway, Lambda, DynamoDB, S3, CloudWatch dashboard and alarms.
-- **Fully testable offline.** 42 tests run in about 2 seconds with no camera, no models and no AWS account.
+- **Fully testable offline.** Unit tests run without a camera, downloaded models, or an AWS account.
 
 ## How it works
 
@@ -235,8 +239,9 @@ boxes, red dots on looming points) and the depth map.
 | `c` | Restart floor calibration |
 | `q` / `Esc` | Quit |
 
-You can also type a question into the terminal and press Enter. Voice input and haptics are
-covered in [docs/SETUP.md](docs/SETUP.md).
+You can also type a question into the terminal and press Enter. Say or type commands such as
+`quiet mode on`, `indoor mode`, `read the sign aloud`, `where did you last see my phone?`, or
+`stop guidance`. See the [edge feature guide](docs/NEW_FEATURES_GUIDE.md) for the full list.
 
 ## Calibrate for your body and camera
 
@@ -376,6 +381,7 @@ opencv-uncane/
     ├── src/uncane/
     │   ├── common/   schemas, spatial geometry, safety verifier, prompts (stdlib only, shared)
     │   ├── edge/     app, depth_engine, geometry, hazards, optical_flow, detector, arbiter,
+    │   │             commands, guidance, monitors, object_memory, user_profile, blackbox,
     │   │             audio_feedback, voice_input, frame_filter, cloud_client, config
     │   └── cloud/    handler (Lambda), vlm (Bedrock/Mantle/SageMaker/mock), tools, memory,
     │                 telemetry, local_server
@@ -383,7 +389,7 @@ opencv-uncane/
     ├── eval/         eval_detector_coco, eval_vizwiz_vlm
     ├── training/sagemaker/   train_vizwiz_lora, launch_training, deploy_endpoint
     ├── models/       ONNX models (downloaded, not committed)
-    └── tests/        42 offline tests + opt-in latency benchmark
+    └── tests/        offline unit tests + opt-in latency benchmark
 ```
 
 ## Troubleshooting
@@ -406,6 +412,8 @@ More in [docs/SETUP.md](docs/SETUP.md) and [docs/AWS_SETUP.md](docs/AWS_SETUP.md
 
 | Doc | For |
 |---|---|
+| [docs/NEW_FEATURES_GUIDE.md](docs/NEW_FEATURES_GUIDE.md) | Offline commands, guidance, monitoring, drop-offs, and local-data behavior |
+| [docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md](docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md) | Validation, privacy, hardware, and daily-wearable follow-up |
 | [docs/SETUP.md](docs/SETUP.md) | Installing, calibrating the camera, running the edge app, hardware, tuning, troubleshooting |
 | [docs/AWS_SETUP.md](docs/AWS_SETUP.md) | Everything on AWS: account, Bedrock access, deploy, API keys, monitoring, security, cost, SageMaker, teardown |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Algorithms, contracts, safety rules, latency budget, graceful degradation |

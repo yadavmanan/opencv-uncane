@@ -64,11 +64,76 @@ class GeometricHazardAnalyzer:
                 prox = float(np.clip(1.0 - dist / c["max_range_m"], 0.0, 1.0))
                 hazards.append(HazardItem(zone=zone, level=level, proximity=round(prox, 3),
                                           urgency=urgency, distance_m=round(dist, 2)))
+        dropoff_mask = np.zeros_like(near)
+        if c.get("dropoff_enabled", True):
+            # Depth error alone puts floor up to ~H_cam * error below the plane, so require a deep
+            # region that covers much of what is in range, not a few noisy pixels.
+            in_range = (fwd > 0.15) & (fwd < c.get("dropoff_range_m", 4.5))
+            dropoff_mask = in_range & (H < -c.get("dropoff_min_depth_m", 0.40))
+            for zone, zmask in zones.items():
+                m = dropoff_mask & zmask
+                share = float(m.sum()) / max(1, int((in_range & zmask).sum()))
+                if int(m.sum()) < min_px or share < c.get("dropoff_min_share", 0.25):
+                    continue
+                # We see the lowered floor beyond the edge, so rescale back to where the edge is.
+                below = float(-np.median(H[m]))
+                cam_h = self.geometry.height_m
+                dist = float(np.percentile(fwd[m], 10)) * cam_h / (cam_h + below)
+                if dist < c.get("dropoff_critical_m", 1.7):
+                    urgency = "CRITICAL"
+                elif dist < c.get("dropoff_warning_m", 2.6):
+                    urgency = "WARNING"
+                else:
+                    continue
+                prox = float(np.clip(1.0 - dist / c["max_range_m"], 0.0, 1.0))
+                hazards.append(HazardItem(zone=zone, level="GROUND", proximity=round(prox, 3),
+                                          urgency=urgency, distance_m=round(dist, 2), label="drop-off"))
+        if c.get("merge_adjacent_levels", True):
+            hazards = self._merge_adjacent_levels(hazards, c.get("level_merge_distance_m", 0.5))
         grid = cv2.resize(np.minimum(Z, 20.0), (c["grid_cols"], c["grid_rows"]), interpolation=cv2.INTER_AREA)
         depth_grid = DepthGrid(rows=c["grid_rows"], cols=c["grid_cols"], kind="metric_m",
                                values=[round(float(v), 2) for v in grid.ravel()])
         return HazardFrame(hazards, depth_grid, metric_depth=Z, calibrated=True,
-                           debug={"solid_mask": solid})
+                           debug={"solid_mask": solid, "dropoff_mask": dropoff_mask})
+
+    @staticmethod
+    def _merge_adjacent_levels(hazards: List[HazardItem], max_distance_delta_m: float) -> List[HazardItem]:
+        level_order = {"GROUND": 0, "TORSO": 1, "HEAD": 2}
+        urgency_rank = {"INFO": 0, "WARNING": 1, "CRITICAL": 2}
+        merged: List[HazardItem] = []
+        for zone in ("LEFT", "CENTER", "RIGHT"):
+            zone_hazards = sorted(
+                (hazard for hazard in hazards if hazard.zone == zone),
+                key=lambda hazard: (hazard.label == "drop-off", level_order[hazard.level]),
+            )
+            groups: List[List[HazardItem]] = []
+            for hazard in zone_hazards:
+                if groups:
+                    previous = groups[-1][-1]
+                    same_kind = (hazard.label == "drop-off") == (previous.label == "drop-off")
+                    adjacent = same_kind and level_order[hazard.level] - level_order[previous.level] == 1
+                    nearby = (hazard.distance_m is None or previous.distance_m is None or
+                              abs(hazard.distance_m - previous.distance_m) <= max_distance_delta_m)
+                    if adjacent and nearby:
+                        groups[-1].append(hazard)
+                        continue
+                groups.append([hazard])
+            for group in groups:
+                nearest = min((h.distance_m for h in group if h.distance_m is not None), default=None)
+                representative = min(
+                    group,
+                    key=lambda h: (-urgency_rank[h.urgency],
+                                   h.distance_m if h.distance_m is not None else float("inf")),
+                )
+                merged.append(HazardItem(
+                    zone=zone,
+                    level=representative.level,
+                    proximity=max(h.proximity for h in group),
+                    urgency=max(group, key=lambda h: urgency_rank[h.urgency]).urgency,
+                    distance_m=nearest,
+                    label=representative.label,
+                ))
+        return merged
 
     def _urgency(self, zone: str, level: str, dist: float) -> Optional[str]:
         c = self.cfg
