@@ -4,3 +4,7 @@
 anthropic[bedrock]>=1.8.0
 # Qwen3-VL / open models on Bedrock Mantle use the OpenAI-compatible SDK (VLM_BACKEND=mantle).
 openai>=3.24,<4
+# OpenCV tools for the agent (cloud/vision_tools.py). Without it the tools are simply not offered.
+# Verify an arm64 wheel exists for the Lambda runtime before the next `sam build`.
+opencv-python-headless>=5.0,<6
+numpy>=1.26

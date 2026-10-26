@@ -67,6 +67,8 @@ def navigate(req: NavigateRequest, request_id: str) -> NavigateResponse:
     backend, memory, telemetry = _deps()
     history = memory.load(req.session_id) if req.mode == "query" else []
     result = backend.run(req, history)
+    log.info("agent_trace request_id=%s tools=%s trace=%s", request_id, result.tools_used,
+             json.dumps(result.trace, separators=(",", ":")))
     answer = result.answer
     raw_speech = answer.speech
 
@@ -87,6 +89,7 @@ def navigate(req: NavigateRequest, request_id: str) -> NavigateResponse:
         override_reasons=verified.reasons,
         needs_better_view=answer.needs_better_view,
         tools_used=result.tools_used,
+        agent_trace=result.trace,
         model_id=result.model_id,
         latency_ms={"model": round(result.model_ms, 1), "total": round(total_ms, 1)},
         request_id=request_id,
@@ -110,6 +113,15 @@ def navigate(req: NavigateRequest, request_id: str) -> NavigateResponse:
     return resp
 
 
+def _model_name() -> str:
+    """The model the active backend uses, matching each backend's own default."""
+    if _backend is not None and getattr(_backend, "model_id", ""):
+        return _backend.model_id
+    backend = os.environ.get("VLM_BACKEND", "bedrock").lower()
+    default = "qwen.qwen3-vl-235b-a22b-instruct" if backend == "mantle" else "anthropic.claude-sonnet-5"
+    return os.environ.get("MODEL_ID", default)
+
+
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     request_id = getattr(context, "aws_request_id", None) or uuid.uuid4().hex
     method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "")
@@ -117,7 +129,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
     if method == "GET" and path.endswith("/health"):
         return _response(200, {"status": "ok", "backend": os.environ.get("VLM_BACKEND", "bedrock"),
-                               "model": os.environ.get("MODEL_ID", "anthropic.claude-sonnet-5")})
+                               "model": _model_name()})
     if method != "POST" or not path.endswith("/navigate"):
         return _response(404, {"error": "not found"})
 

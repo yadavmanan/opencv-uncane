@@ -15,6 +15,7 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 
 from ..common.schemas import DIRECTIONS, NavigateRequest
+from .vision_tools import AVAILABLE as VISION_AVAILABLE, VISION_TOOLS
 
 log = logging.getLogger(__name__)
 
@@ -62,6 +63,12 @@ LOCATION_TOOL: Dict[str, Any] = {
 }
 
 ALL_TOOLS: List[Dict[str, Any]] = [LOCATION_TOOL, TRANSIT_TOOL, FINAL_ANSWER_TOOL]
+
+
+def agent_tools() -> List[Dict[str, Any]]:
+    """Everything the agent may call. The OpenCV tools are left out when OpenCV is not installed."""
+    vision = VISION_TOOLS if VISION_AVAILABLE else []
+    return [LOCATION_TOOL, TRANSIT_TOOL, *vision, FINAL_ANSWER_TOOL]
 
 
 class ToolError(Exception):

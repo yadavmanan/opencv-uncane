@@ -390,6 +390,9 @@ class EdgeApp:
             log.info("edge re-verification changed answer: %s", checked.reasons)
         self.last_answer = checked.speech
         log.info("cloud answer in %.0f ms: %s", res.round_trip_ms, checked.speech)
+        if resp.agent_trace:
+            log.info("agent OpenCV tools: %s", " -> ".join(
+                f"{t['tool']} ({t['ms']:.0f} ms)" for t in resp.agent_trace))
         self.speaker.say(checked.speech, PRIORITY_CLOUD)
         guidance_cfg = self.cfg["guidance"]
         if guidance_cfg["enabled"] and resp.target and resp.target.bbox:
@@ -520,6 +523,13 @@ class EdgeApp:
         return True
 
 
+def _require_opencv5() -> None:
+    major = int(cv2.__version__.split(".")[0])
+    if major < 5:
+        raise SystemExit(f"OpenCV 5 is required, found {cv2.__version__}. Run: pip install -r requirements-edge.txt")
+    log.info("OpenCV %s", cv2.__version__)
+
+
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description="UnCane-y AI edge runtime")
     ap.add_argument("--config", default="config/edge_config.yaml")
@@ -532,6 +542,7 @@ def main(argv=None) -> None:
     overrides = list(args.set) + ([f"camera.source={args.source}"] if args.source else [])
     cfg = load_config(args.config, overrides)
     logging.basicConfig(level=cfg["debug"]["log_level"], format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    _require_opencv5()
     app = EdgeApp(cfg, headless=args.headless)
     app.run(max_frames=args.frames, startup_query=args.ask)
     p50, p95 = app.latency_stats()

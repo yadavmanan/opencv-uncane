@@ -211,6 +211,7 @@ class NavigateResponse:
     override_reasons: List[str] = field(default_factory=list)
     needs_better_view: bool = False
     tools_used: List[str] = field(default_factory=list)
+    agent_trace: List[Dict[str, Any]] = field(default_factory=list)   # per tool call: args, result, ms
     model_id: str = ""
     latency_ms: Dict[str, float] = field(default_factory=dict)
     request_id: str = ""
@@ -229,6 +230,7 @@ class NavigateResponse:
             override_reasons=list(d.get("override_reasons") or []),
             needs_better_view=bool(d.get("needs_better_view", False)),
             tools_used=list(d.get("tools_used") or []),
+            agent_trace=list(d.get("agent_trace") or []),
             model_id=str(d.get("model_id", "")),
             latency_ms=dict(d.get("latency_ms") or {}),
             request_id=str(d.get("request_id", "")),

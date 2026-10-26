@@ -366,6 +366,8 @@ call, action, or request for human approval." UnCane meets this in four places. 
 | 2 | **The agent's bbox plus the OpenCV depth grid** | The spoken action is computed, not generated: `bearing = atan((cx − 0.5)·2·tan(HFOV/2))`, distance comes from the depth grid under the box, and steps = distance ÷ 0.7 m. |
 | 3 | **The safety verifier** compares the agent's output with the depth map, twice. | The action is overridden (rules below). |
 | 4 | **Sharpness score and `needs_better_view`** | The system asks the user to re-aim ("turn a little to your right and ask again") rather than giving a confident wrong answer. This is a request for human action. |
+| 5 | **`assess_image_quality`**, an OpenCV tool the agent calls mid-loop | A blurry, dark or glared photo ends the loop with a re-aim request instead of a guess; a sharp one lets the agent go on to read. |
+| 6 | **`zoom_region`, `analyze_region_color`, `measure_region_depth`**, also OpenCV tools the agent calls | The zoomed crop goes back to the model, so its next answer is based on a new image it asked for; a colour mismatch lowers its confidence and changes its wording; the depth reading replaces its own distance guess. See §6.5. |
 
 **The verifier's rules** (`src/uncane/common/verifier.py`):
 
@@ -413,6 +415,38 @@ supplied the turn angle and step count.
 | Override rate in the field | CloudWatch `SafetyOverride` metric | `[TO MEASURE]`% of answers |
 | Re-aim behaviour | `needs_better_view` compared with VizWiz "unanswerable" labels (precision / recall) | `[TO MEASURE]` |
 | Observability | X-Ray trace per request, per-request JSON in S3, EMF metrics, dashboard | In place |
+
+### 6.5 The agent calls OpenCV 5 tools
+
+The cloud agent has five OpenCV-backed tools (`src/uncane/cloud/vision_tools.py`), offered alongside
+`final_answer`. They run on the photo the device sent, and their output returns to the model in the
+same loop (the zoomed crop comes back as an image), so the model's next step depends on what OpenCV
+measured.
+
+| Tool | OpenCV operation | How the result changes the next step |
+|---|---|---|
+| `assess_image_quality` | Laplacian variance, brightness, contrast, glare | Unusable photo: the agent stops and asks the user to re-aim. Usable: it continues to read |
+| `find_text_regions` | Morphological gradient, Otsu threshold, contour filtering | Picks the box to zoom into |
+| `zoom_region` | Crop, cubic upscale, CLAHE, unsharp mask | The model reads from the new, larger image |
+| `analyze_region_color` | HSV histogram of the box | A colour mismatch makes the agent doubt or drop its candidate |
+| `measure_region_depth` | Edge depth grid under the box | Replaces the model's own distance estimate, and flags a critical obstacle |
+
+Every call is recorded (arguments, result, image returned or not, milliseconds) in the response's
+`agent_trace` and in the S3 telemetry record. The loop is capped at five model turns and four tool
+calls per request, and failures come back as tool errors rather than crashes. Human control: unusable
+evidence produces a request for the person to act, not a guess, and the verifier still has the last word
+on safety.
+
+**Reproduce:** `python eval/eval_agent_tools.py` runs six labelled cases through the Lambda handler
+and writes the traces to `eval/agent_traces.json`. `pytest tests/test_vision_tools.py` covers each tool
+on real rendered images, the Claude and OpenAI-style loops (including the image fed back), the tool
+budget and the trace.
+
+**What this does and does not show.** The offline run uses the mock backend, which follows a fixed
+policy, so it proves the tools, the data flow and the logging, not model judgement. How often a real
+model chooses the right tool is `[TO MEASURE]` with `--backend mantle` or `bedrock` and must be reported
+separately. `find_text_regions` is a candidate finder: on a cluttered photo it returns boxes that are not
+text, which is why the agent confirms by zooming. These tools are not deployed in the live stack yet.
 | Human control | The user starts every cloud query. The device never moves the user; it only advises. Crossings are never certified. Safety speech always takes priority over AI speech. | By design |
 
 **Why not COOL.** Our heavy vision workload runs on the wearable, not in the cloud, because
@@ -723,7 +757,7 @@ Contact: `[email]` · `#OpenCVComp26`
 
 - [ ] Technical report (this file), with every `[TO MEASURE]` and `[ ]` filled in or removed
 - [ ] Repository access granted to the judges
-- [ ] `requirements-lock.txt` with exact versions
+- [x] `requirements-lock.txt` with exact versions (`uncane/requirements-lock.txt`, OpenCV 5.0.0.93)
 - [ ] Architecture diagram image in `docs/img/` (OpenCV 5 and AWS components clearly marked)
 - [ ] Agent workflow diagram image (perceive, decide, act)
 - [ ] Stack deployed and `ApiUrl/v1/health` returns 200; live screen-share slot arranged

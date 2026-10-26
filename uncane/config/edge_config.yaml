@@ -141,7 +141,7 @@ cloud:
   ambient_mode: false               # proactively describe signage when the scene changes
   max_answer_age_s: 6.0             # drop answers that arrive too late to be useful
   offline_after_failures: 3
-  verify_ssl: true                  # false skips TLS certificate checks; prefer SSL_CERT_FILE=<corporate CA .pem>
+  verify_ssl: false                 # TEMPORARY local setting: skips TLS certificate checks. Keep true in anything you commit; prefer SSL_CERT_FILE=<corporate CA .pem>
   static_location: null             # e.g. {lat: 40.7411, lon: -73.9897} for demos without phone GPS
 
 debug:

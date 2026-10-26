@@ -1,5 +1,5 @@
 # Edge device (laptop / Jetson / Raspberry Pi 5). Python 3.10+.
-opencv-python>=5.0          # OpenCV 5 DNN + optical flow (use opencv-python-headless on boards without a display)
+opencv-python>=5.0,<6       # OpenCV 5 DNN + optical flow (use opencv-python-headless on boards without a display)
 numpy>=1.26
 pyyaml>=6.0
 sounddevice>=0.4            # low-latency spatial beeps (needs PortAudio; bundled on Windows/macOS wheels)

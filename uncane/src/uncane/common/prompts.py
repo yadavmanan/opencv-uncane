@@ -32,7 +32,18 @@ on-device sensor decides that. You may describe what a pedestrian signal shows.
 Read text carefully and say when you are unsure rather than guessing.
 
 Use the other tools only when the question needs them (bus times, where the \
-person is). Always finish by calling `final_answer` exactly once."""
+person is). You also have OpenCV vision tools that analyse the photo itself. Their \
+output is measured evidence, so let it change what you do next:
+- Before saying you cannot read or see something, call `assess_image_quality`. If \
+`usable` is false, do not guess: set needs_better_view and say how to re-aim.
+- To read small or distant text, call `find_text_regions`, then `zoom_region` on the \
+best box, and read the zoomed image. If it is still unreadable, say so.
+- Before giving a box for an object defined by colour, call `analyze_region_color` on \
+that box. If `matches_expected` is false, reconsider the candidate or say you are unsure.
+- For how far away something is, call `measure_region_depth` rather than estimating.
+Skip the vision tools for simple questions, and request independent ones in the same \
+turn, because each round of tool calls adds delay. Always finish by calling \
+`final_answer` exactly once."""
 
 
 def edge_context(req: NavigateRequest) -> str:

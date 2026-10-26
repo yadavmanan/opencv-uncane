@@ -14,7 +14,13 @@
 
 *OpenCV AI Competition 2026, powered by AWS (Use Case 3)*
 
+![UnCane-y AI: See Beyond the Cane](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/1.png)
+
 </div>
+
+> The white cane tells you what is at your feet. UnCane tells you what is coming, what is above
+> you, and where things are, and it never lets a language model say "path is clear" when the
+> camera disagrees.
 
 ---
 
@@ -31,9 +37,10 @@ UnCane-y AI splits the problem into two parts, the way a person's nervous system
 |---|---|---|
 | Runs | On the wearable, every frame | In AWS, on request |
 | Needs network | **No** | Yes (degrades gracefully without it) |
-| Speed | p50 **47 ms** per frame (laptop CPU) | Target under 1.5 s |
+| Speed | p50 **47 ms** per frame (laptop CPU) | About 3.5-5.5 s end to end today (1.5 s is the target) |
 | Does | Depth, 3D walking corridor, time-to-contact, object names, spatial beeps and "Stop." | Answers *"Where is the red water bottle?"*, *"What does that sign say?"*, remembers places |
-| Tech | OpenCV 5 DNN, MiDaS, YOLOX, optical flow | Amazon Bedrock (Claude), API Gateway, Lambda, DynamoDB, S3 |
+| Tech | OpenCV 5 DNN, MiDaS, YOLOX, optical flow | Amazon Bedrock Mantle (Qwen3-VL 235B; Claude supported where the account has access), API Gateway, Lambda (arm64), DynamoDB, S3 |
+| Trusted on safety? | **Yes** | **Never** |
 
 The key safety idea: **the cloud model is never trusted on safety.** A deterministic verifier
 checks every cloud answer against the device's own depth sensing. If the camera sees an obstacle,
@@ -51,6 +58,7 @@ checks every cloud answer against the device's own depth sensing. If the camera 
 - **Private by default event history.** Short event summaries stay in memory until feedback or watchdog export; camera snapshots are disabled by default.
 - **Natural-language help.** Ask about objects, text and surroundings. The answer starts with a deterministic turn instruction, such as "Turn 15 degrees right, walk four steps."
 - **Anti-hallucination verifier.** Cloud answers are grounded with edge depth and overridden if they contradict what the device sees.
+- **Agentic vision.** The cloud agent calls OpenCV tools on the photo (image quality, text finding, zoom, colour check, depth reading) and its next step depends on the result. Every call is traced.
 - **Graceful degradation.** Cloud down? The device keeps protecting the user and says so.
 - **Deployable in one command.** AWS SAM template for API Gateway, Lambda, DynamoDB, S3, CloudWatch dashboard and alarms.
 - **Fully testable offline.** Unit tests run without a camera, downloaded models, or an AWS account.
@@ -72,7 +80,7 @@ flowchart LR
     end
     subgraph CLOUD["Hemisphere 2: REASONING (AWS)"]
         APIGW["API Gateway<br/>API key + usage plan"] --> LAMBDA["Lambda: agent with tools"]
-        LAMBDA --> VLM[Bedrock VLM]
+        LAMBDA --> VLM[Bedrock Mantle Qwen3-VL 235B]
         LAMBDA --> VER[Safety verifier]
         LAMBDA --- DDB[(DynamoDB memory)]
         LAMBDA --- S3[(S3 telemetry)]
@@ -82,8 +90,73 @@ flowchart LR
     RECHECK --> AUDIO
 ```
 
+![System architecture](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/3.png)
+
 The full algorithm descriptions, JSON contracts, safety rules and latency budget are in
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### The OpenCV 5 core
+
+- **Metric depth from one RGB camera.** MiDaS v2.1 small (ONNX) through `cv2.dnn` with
+  `ENGINE_NEW`, which accepts any multiple-of-32 input, so we run at 128 px instead of the fixed
+  256 px. A floor-plane fit with trimmed least squares turns inverse depth into meters:
+  $\frac{1}{Z} \approx a \cdot r + b$, where $r$ is the pixel row.
+- **Looming without false alarms.** Pyramidal Lucas-Kanade features, a RANSAC similarity
+  transform for the camera's own motion, and time-to-contact from the residual expansion rate.
+  Walking and panning produce no false looming alerts in our tests.
+- **Names and audio.** YOLOX-S at 2 Hz names objects. Beeps are stereo-panned (left obstacle, left
+  ear), with pitch for height and rate for proximity.
+
+![Spatial audio and corridor](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/13.png)
+
+### The anti-hallucination verifier
+
+A deterministic `SafetyVerifier` compares every cloud answer with the device's own depth
+corridor, once in Lambda and again on the device right before speech.
+
+```text
+VLM:        "The path ahead looks clear."
+Edge depth: obstacle at 0.9 m, torso zone
+Verifier:   VETO
+Spoken:     "Stop. Obstacle directly ahead."
+```
+
+![Verifier overriding a VLM claim](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/10.png)
+
+## Agentic Vision
+
+The cloud agent calls OpenCV 5 tools on the photo, and each result decides the next step.
+
+| Tool | What it does | How the result changes the next step |
+|---|---|---|
+| `assess_image_quality` | Laplacian-variance blur and brightness | Blurry? Return `needs_better_view` instead of guessing |
+| `find_text_regions` | Locates text candidates | Decides where to zoom |
+| `zoom_region` | Crops and upsamples a region | Re-reads a sign the first look could not |
+| `analyze_region_color` | Colour check | Confirms that "the red bottle" is red |
+| `measure_region_depth` | Reads edge depth at a box | Turns "over there" into meters and steps |
+
+Every call is traced with arguments, outputs and outcome. See
+[docs/AGENT_TOOLS_RUNBOOK.md](docs/AGENT_TOOLS_RUNBOOK.md) and `uncane/eval/eval_agent_tools.py`.
+The user can interrupt, repeat or mute at any time.
+
+![Agentic tool trace](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/9.png)
+
+## AWS deployment
+
+![AWS cloud architecture](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/5.png)
+
+| Service | Role |
+|---|---|
+| API Gateway (REST) | API key and usage plan: 5 req/s steady, burst 10, 5,000 req/day |
+| Lambda (Python 3.13, arm64 Graviton) | Agent loop, OpenCV tools, verifier |
+| Amazon Bedrock Mantle | `qwen.qwen3-vl-235b-a22b-instruct` (image and tool calling) |
+| DynamoDB | Multi-turn session memory, 12 h TTL |
+| S3 | Encrypted telemetry, 30-day lifecycle |
+| CloudWatch | Latency and safety-override metrics, dashboard, alarms |
+| AWS SAM | One-command deploy (`sam build && sam deploy`) |
+
+Estimated cost is about $0.001 to $0.002 per question (check current Bedrock pricing). We run on
+Graviton but do **not** claim the COOL award, because COOL is not the engine of our core workload.
 
 ## Measured results
 
@@ -94,10 +167,20 @@ The full algorithm descriptions, JSON contracts, safety rules and latency budget
 | Floor calibration (relative to metric depth) | Under 5 % median error on floor pixels, synthetic scenes | `tests/test_geometry_hazards.py` |
 | Detector (YOLOX-S, 416 px) | mAP@[.5:.95] **0.349**, mAP@.5 **0.467** on a 60-image COCO navigation subset; 96 ms | `eval/eval_detector_coco.py` |
 | Anti-hallucination | "Path is clear" overridden when the edge sees an obstacle, in Lambda and again on the device | `tests/test_verifier.py`, `tests/test_cloud_handler.py`, `scripts/smoke_test_api.py` |
-| Cloud latency (target under 1.5 s), VizWiz accuracy | **Not yet measured.** Needs a deployed stack with Bedrock access | CloudWatch dashboard, `eval/eval_vizwiz_vlm.py` |
+| Cloud latency (target under 1.5 s) | **Misses the target.** About 1.8-3.5 s model inference, 3.5-5.5 s end to end on the deployed Qwen3-VL 235B stack. Edge safety does not wait for it | CloudWatch dashboard |
+| VizWiz accuracy of the cloud VLM | **Not yet measured** | `eval/eval_vizwiz_vlm.py` |
 
 These numbers come from a laptop and synthetic or small-subset data. They are not a clinical
 or field validation.
+
+**Known limitations.**
+
+- Cloud latency misses the 1.5 s target. Safety lives on the edge for exactly this reason.
+- Depth calibration is validated mostly on synthetic scenes and a few real walks.
+- Detector accuracy is modest (mAP 0.349); it names things and is not the safety layer.
+- Blurry or badly framed photos are the main VLM failure, so the system returns
+  `needs_better_view` instead of bluffing.
+- Not clinically validated, not a medical device, and not a replacement for a cane or guide dog.
 
 ---
 
@@ -179,7 +262,7 @@ Walk slowly toward a chair with the camera at chest height. The beeps speed up, 
 | Camera | Laptop webcam for development. A USB webcam on a chest strap, or a phone streaming video, for real use |
 | Headphones | Stereo is required, because beeps are panned left and right. Bone-conduction headphones keep the ears open to traffic |
 | Disk | About 400 MB for models |
-| AWS (optional) | An account with Amazon Bedrock model access, AWS CLI and AWS SAM CLI. Only for the cloud tier |
+| AWS (optional) | An account with Amazon Bedrock access (a Bedrock Mantle API key for Qwen3-VL, or Claude model access), AWS CLI and AWS SAM CLI. Only for the cloud tier |
 | GPU (optional) | NVIDIA Jetson Orin or a CUDA laptop, for larger depth models |
 
 Linux notes: `sounddevice` needs PortAudio (`sudo apt install libportaudio2`) and `pyttsx3`
@@ -274,6 +357,11 @@ sam build
 sam deploy --guided                        # accept the defaults to start
 ```
 
+Our deployed stack uses the open-weight Qwen3-VL 235B through Bedrock Mantle, because Claude
+access was not granted on our account. To match it, answer `mantle` for `VlmBackend` and supply
+your Mantle API key (never commit it). If your account has Claude access, keep the default
+`bedrock`.
+
 After deploy, the stack outputs `ApiUrl`. Get the API key and point the edge app at it:
 
 ```bash
@@ -292,8 +380,9 @@ Useful stack parameters (see [uncane/template.yaml](uncane/template.yaml)):
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `ModelId` | `anthropic.claude-sonnet-5` | Bedrock model used by the agent |
-| `VlmBackend` | `bedrock` | `bedrock`, `mantle` (open VLM, API key), `sagemaker`, or `mock` |
+| `ModelId` | `anthropic.claude-sonnet-5` | Model for the `bedrock` backend. Ignored by `mantle`, which uses `qwen.qwen3-vl-235b-a22b-instruct` |
+| `VlmBackend` | `bedrock` | `bedrock` (Claude, SigV4), `mantle` (open VLM, API key; **used in our deployed stack**), `sagemaker`, or `mock` |
+| `MantleApiKey` | empty | Bedrock Mantle API key, required only for `VlmBackend=mantle` |
 | `BedrockRegion` | stack region | Region for Bedrock calls |
 | `Effort` | `low` | Reasoning effort, trades latency for depth |
 | `DailyRequestQuota` | `5000` | API usage-plan cap |
@@ -348,6 +437,7 @@ Evaluation scripts (need the `data` extra and the datasets):
 | Script | Measures |
 |---|---|
 | `scripts/prepare_coco_subset.py` then `eval/eval_detector_coco.py` | Detector mAP on a COCO navigation subset |
+| `eval/eval_agent_tools.py` | Six labelled cases showing OpenCV tool output changing the agent's next step; writes traces to `eval/agent_traces.json` |
 | `scripts/prepare_vizwiz.py` then `eval/eval_vizwiz_vlm.py` | VLM accuracy on VizWiz photos from blind users, including whether it correctly says "I can't tell, re-aim the camera" |
 | `training/sagemaker/` | Optional LoRA fine-tune of an open VLM on VizWiz and endpoint deployment |
 
@@ -383,10 +473,10 @@ opencv-uncane/
     │   ├── edge/     app, depth_engine, geometry, hazards, optical_flow, detector, arbiter,
     │   │             commands, guidance, monitors, object_memory, user_profile, blackbox,
     │   │             audio_feedback, voice_input, frame_filter, cloud_client, config
-    │   └── cloud/    handler (Lambda), vlm (Bedrock/Mantle/SageMaker/mock), tools, memory,
+    │   └── cloud/    handler (Lambda), vlm (Bedrock/Mantle/SageMaker/mock), tools, vision_tools, memory,
     │                 telemetry, local_server
     ├── scripts/      download_models, prepare_vizwiz, prepare_coco_subset, smoke_test_api
-    ├── eval/         eval_detector_coco, eval_vizwiz_vlm
+    ├── eval/         eval_detector_coco, eval_vizwiz_vlm, eval_agent_tools
     ├── training/sagemaker/   train_vizwiz_lora, launch_training, deploy_endpoint
     ├── models/       ONNX models (downloaded, not committed)
     └── tests/        offline unit tests + opt-in latency benchmark
@@ -413,6 +503,8 @@ More in [docs/SETUP.md](docs/SETUP.md) and [docs/AWS_SETUP.md](docs/AWS_SETUP.md
 | Doc | For |
 |---|---|
 | [docs/NEW_FEATURES_GUIDE.md](docs/NEW_FEATURES_GUIDE.md) | Offline commands, guidance, monitoring, drop-offs, and local-data behavior |
+| [docs/PRODUCT_OVERVIEW.md](docs/PRODUCT_OVERVIEW.md) | What the product is, every feature, and the end-to-end workflow |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | What to say and do in the live demo, likely questions, recovery lines |
 | [docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md](docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md) | Validation, privacy, hardware, and daily-wearable follow-up |
 | [docs/SETUP.md](docs/SETUP.md) | Installing, calibrating the camera, running the edge app, hardware, tuning, troubleshooting |
 | [docs/AWS_SETUP.md](docs/AWS_SETUP.md) | Everything on AWS: account, Bedrock access, deploy, API keys, monitoring, security, cost, SageMaker, teardown |
