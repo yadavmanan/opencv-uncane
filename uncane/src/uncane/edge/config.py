@@ -76,8 +76,8 @@ DEFAULTS: Dict[str, Any] = {
         "record_seconds": 4.0, "presets": {},
     },
     "cloud": {
-        "enabled": True, "api_url": "", "api_key": "", "timeout_s": 8.0, "ambient_mode": False,
-        "max_answer_age_s": 6.0, "offline_after_failures": 3, "verify_ssl": True,
+        "enabled": True, "api_url": "", "api_key": "", "timeout_s": 25.0, "ambient_mode": False,
+        "max_answer_age_s": 30.0, "offline_after_failures": 3, "verify_ssl": True,
         "static_location": None,
     },
     "debug": {"show_windows": True, "log_level": "INFO"},

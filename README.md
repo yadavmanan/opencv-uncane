@@ -92,8 +92,6 @@ flowchart LR
 
 ![System architecture](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/3.png)
 
-The full algorithm descriptions, JSON contracts, safety rules and latency budget are in
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### The OpenCV 5 core
 
@@ -135,8 +133,7 @@ The cloud agent calls OpenCV 5 tools on the photo, and each result decides the n
 | `analyze_region_color` | Colour check | Confirms that "the red bottle" is red |
 | `measure_region_depth` | Reads edge depth at a box | Turns "over there" into meters and steps |
 
-Every call is traced with arguments, outputs and outcome. See
-[docs/AGENT_TOOLS_RUNBOOK.md](docs/AGENT_TOOLS_RUNBOOK.md) and `uncane/eval/eval_agent_tools.py`.
+Every call is traced with arguments, outputs and outcome. See `uncane/eval/eval_agent_tools.py`.
 The user can interrupt, repeat or mute at any time.
 
 ![Agentic tool trace](https://ik.imagekit.io/jroc4gnvp/devpost_hack/opencv/9.png)
@@ -197,9 +194,8 @@ or field validation.
 9. [Hardware options](#hardware-options)
 10. [Project layout](#project-layout)
 11. [Troubleshooting](#troubleshooting)
-12. [Documentation index](#documentation-index)
-13. [Safety notice](#safety-notice)
-14. [License](#license)
+12. [Safety notice](#safety-notice)
+13. [License](#license)
 
 ---
 
@@ -324,7 +320,7 @@ boxes, red dots on looming points) and the depth map.
 
 You can also type a question into the terminal and press Enter. Say or type commands such as
 `quiet mode on`, `indoor mode`, `read the sign aloud`, `where did you last see my phone?`, or
-`stop guidance`. See the [edge feature guide](docs/NEW_FEATURES_GUIDE.md) for the full list.
+`stop guidance`, `status`, `repeat`, `speak slower`, `add note ...`.
 
 ## Calibrate for your body and camera
 
@@ -342,8 +338,8 @@ Also set `mount.user_height_m` (top of the head), which bounds head-level hazard
 **Check it:** in an open corridor, wait for the status to read `depth metric`, then place a box
 1.5 m ahead. You should see "WARNING box directly ahead at ground level, about 1.5 meters",
 give or take 20 %. If distances are consistently off, adjust `pitch_deg` first, then
-`height_m`. The full procedure, including how to measure the field of view, is in
-[docs/SETUP.md](docs/SETUP.md).
+`height_m`. Measure your camera's horizontal field of view and set `camera.hfov_deg`, because the
+geometry depends on it.
 
 ## Deploy the cloud tier on AWS
 
@@ -389,8 +385,7 @@ Useful stack parameters (see [uncane/template.yaml](uncane/template.yaml)):
 | `SaveKeyframes` | `false` | Store uploaded keyframes in S3 (off by default for privacy) |
 | `AlarmEmail` | empty | Email for CloudWatch alarm notifications |
 
-Full walkthrough (Bedrock model access, security, cost, monitoring, SageMaker fine-tuning,
-teardown): [docs/AWS_SETUP.md](docs/AWS_SETUP.md). To delete everything: `sam delete`.
+To delete everything: `sam delete`.
 
 > The committed [uncane/samconfig.toml](uncane/samconfig.toml) holds sample deploy defaults.
 > `sam deploy --guided` lets you override them. Never commit API keys.
@@ -422,7 +417,7 @@ Environment variables:
 | `MODEL_ID` / `AWS_REGION` | Cloud | Bedrock model and region when running the local server |
 | `UNCANE_LATENCY_BUDGET_MS` | Tests | Latency budget for `pytest -m latency` |
 
-The complete tuning table is in [docs/SETUP.md](docs/SETUP.md).
+Every tunable value is in `uncane/config/edge_config.yaml`, with comments.
 
 ## Testing and evaluation
 
@@ -441,8 +436,8 @@ Evaluation scripts (need the `data` extra and the datasets):
 | `scripts/prepare_vizwiz.py` then `eval/eval_vizwiz_vlm.py` | VLM accuracy on VizWiz photos from blind users, including whether it correctly says "I can't tell, re-aim the camera" |
 | `training/sagemaker/` | Optional LoRA fine-tune of an open VLM on VizWiz and endpoint deployment |
 
-Datasets are not stored in this repo. See [docs/DATA_AND_TRAINING.md](docs/DATA_AND_TRAINING.md)
-for how to download them and interpret the metrics.
+Datasets are not stored in this repo. Use `uncane/scripts/prepare_coco_subset.py` and
+`uncane/scripts/prepare_vizwiz.py` to download them, then the scripts in `uncane/eval/`.
 
 ## Hardware options
 
@@ -460,7 +455,6 @@ for how to download them and interpret the metrics.
 opencv-uncane/
 ├── README.md                 this guide
 ├── LICENSE                   MIT
-├── docs/                     setup, architecture, AWS, data, demo, product and submission docs
 └── uncane/                   the runnable project (run every command from here)
     ├── pyproject.toml            package metadata and pytest config
     ├── requirements-dev.txt      edge + cloud + test dependencies
@@ -496,23 +490,6 @@ opencv-uncane/
 | Cloud always `OFFLINE` | Check `UNCANE_API_URL` (must include `/prod`) and `UNCANE_API_KEY`; run `scripts/smoke_test_api.py` |
 | HTTP 403 from the API | Missing or wrong API key |
 
-More in [docs/SETUP.md](docs/SETUP.md) and [docs/AWS_SETUP.md](docs/AWS_SETUP.md).
-
-## Documentation index
-
-| Doc | For |
-|---|---|
-| [docs/NEW_FEATURES_GUIDE.md](docs/NEW_FEATURES_GUIDE.md) | Offline commands, guidance, monitoring, drop-offs, and local-data behavior |
-| [docs/PRODUCT_OVERVIEW.md](docs/PRODUCT_OVERVIEW.md) | What the product is, every feature, and the end-to-end workflow |
-| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | What to say and do in the live demo, likely questions, recovery lines |
-| [docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md](docs/PRODUCT_ROADMAP_DAILY_WEARABLE.md) | Validation, privacy, hardware, and daily-wearable follow-up |
-| [docs/SETUP.md](docs/SETUP.md) | Installing, calibrating the camera, running the edge app, hardware, tuning, troubleshooting |
-| [docs/AWS_SETUP.md](docs/AWS_SETUP.md) | Everything on AWS: account, Bedrock access, deploy, API keys, monitoring, security, cost, SageMaker, teardown |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Algorithms, contracts, safety rules, latency budget, graceful degradation |
-| [docs/DATA_AND_TRAINING.md](docs/DATA_AND_TRAINING.md) | COCO and VizWiz pipelines, evaluation metrics, prompt-engineering loop, LoRA fine-tune |
-| [docs/DEMO_RUNBOOK.md](docs/DEMO_RUNBOOK.md) | Stage demo checklist, script, recovery plans, user-study protocol |
-| [docs/PRODUCT_AND_GO_TO_MARKET.md](docs/PRODUCT_AND_GO_TO_MARKET.md) | Product, customers, competition, business model |
-| [docs/SUBMISSION.md](docs/SUBMISSION.md) | Competition technical report and evidence map |
 
 ## Safety notice
 

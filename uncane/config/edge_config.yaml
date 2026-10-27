@@ -137,11 +137,11 @@ cloud:
   enabled: true
   api_url: "${UNCANE_API_URL}"      # from `sam deploy` output ApiUrl, e.g. https://abc.execute-api.us-east-1.amazonaws.com/prod
   api_key: "${UNCANE_API_KEY}"      # from `aws apigateway get-api-key --include-value`
-  timeout_s: 8.0
+  timeout_s: 25.0
   ambient_mode: false               # proactively describe signage when the scene changes
-  max_answer_age_s: 6.0             # drop answers that arrive too late to be useful
+  max_answer_age_s: 30.0            # agent tool loops take 5-15 s; Lambda timeout is 28 s
   offline_after_failures: 3
-  verify_ssl: false                 # TEMPORARY local setting: skips TLS certificate checks. Keep true in anything you commit; prefer SSL_CERT_FILE=<corporate CA .pem>
+  verify_ssl: true                  # set false only for local demos behind a TLS-intercepting proxy (prefer SSL_CERT_FILE=<corporate CA .pem>)
   static_location: null             # e.g. {lat: 40.7411, lon: -73.9897} for demos without phone GPS
 
 debug:
